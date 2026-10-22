@@ -1,0 +1,510 @@
+{
+  "id": "app-contenedores",
+  "name": "Aplicación en contenedores",
+  "description": "Servicio de contenedores administrado con registro privado, identidad propia, HTTPS y escalado automático.",
+  "icon": "container",
+  "providers": [
+    "azure",
+    "aws",
+    "gcp",
+    "oci"
+  ],
+  "inputs": [
+    {
+      "name": "name",
+      "label": "Nombre",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "pattern": "^[a-z][a-z0-9-]{1,22}[a-z0-9]$",
+      "help": "De 3 a 24 caracteres: minúsculas, números y guiones; empieza con letra."
+    },
+    {
+      "name": "environment",
+      "label": "Ambiente",
+      "type": "select",
+      "default": "dev",
+      "required": true,
+      "options": [
+        "dev",
+        "test",
+        "prod"
+      ],
+      "help": "En prod se activan la protección contra borrado y las copias geo-redundantes."
+    },
+    {
+      "name": "image",
+      "label": "Imagen",
+      "type": "string",
+      "default": "public.ecr.aws/nginx/nginx-unprivileged:stable-alpine",
+      "required": true,
+      "help": "registro/repositorio:etiqueta. En AWS debe venir de ECR o ECR Public."
+    },
+    {
+      "name": "port",
+      "label": "Puerto del contenedor",
+      "type": "number",
+      "default": 8080,
+      "required": true,
+      "min": 1,
+      "max": 65535,
+      "help": "Puerto en el que escucha la aplicación."
+    },
+    {
+      "name": "public",
+      "label": "Acceso desde Internet",
+      "type": "bool",
+      "default": false,
+      "required": false,
+      "help": "Publica la aplicación en Internet por HTTPS. Si no, solo se llega desde la red interna."
+    },
+    {
+      "name": "allow_unauthenticated",
+      "label": "Invocación sin autenticación",
+      "type": "bool",
+      "default": false,
+      "required": false,
+      "help": "Solo GCP: permite allUsers como invocador. Es un riesgo de seguridad alto.",
+      "providers": [
+        "gcp"
+      ]
+    },
+    {
+      "name": "subnet_id",
+      "label": "Subred",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Solo OCI: OCID de la subred privada (salida 'subnets' de Red base).",
+      "providers": [
+        "oci"
+      ]
+    },
+    {
+      "name": "create_registry",
+      "label": "Crear repositorio OCIR",
+      "type": "bool",
+      "default": false,
+      "required": false,
+      "help": "Solo OCI: crea un repositorio privado e inmutable en OCIR.",
+      "providers": [
+        "oci"
+      ]
+    }
+  ],
+  "sizes": {
+    "pequeno": {
+      "label": "Pequeño: 0,5 vCPU, 1 GB, hasta 3 réplicas",
+      "vars": {
+        "cpu": 0.5,
+        "memory_gb": 1,
+        "min_replicas": 0,
+        "max_replicas": 3
+      },
+      "monthly": {
+        "azure": 25,
+        "aws": 30,
+        "gcp": 10,
+        "oci": 25
+      }
+    },
+    "mediano": {
+      "label": "Mediano: 1 vCPU, 2 GB, de 1 a 5 réplicas",
+      "vars": {
+        "cpu": 1,
+        "memory_gb": 2,
+        "min_replicas": 1,
+        "max_replicas": 5
+      },
+      "monthly": {
+        "azure": 75,
+        "aws": 80,
+        "gcp": 60,
+        "oci": 45
+      }
+    },
+    "grande": {
+      "label": "Grande: 2 vCPU, 4 GB, de 2 a 10 réplicas",
+      "vars": {
+        "cpu": 2,
+        "memory_gb": 4,
+        "min_replicas": 2,
+        "max_replicas": 10
+      },
+      "monthly": {
+        "azure": 190,
+        "aws": 220,
+        "gcp": 170,
+        "oci": 90
+      }
+    }
+  },
+  "outputs": [
+    {
+      "name": "url",
+      "label": "URL",
+      "kind": "url"
+    },
+    {
+      "name": "registry",
+      "label": "Registro de imágenes",
+      "kind": "text"
+    }
+  ],
+  "demo": {
+    "azure": [
+      {
+        "type": "azurerm_log_analytics_workspace",
+        "name": "this",
+        "values": {
+          "name": "log-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "sku": "PerGB2018",
+          "retention_in_days": 30,
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "workspace_id"
+        ]
+      },
+      {
+        "type": "azurerm_container_registry",
+        "name": "this",
+        "values": {
+          "name": "acr{{name}}{{environment}}",
+          "location": "{{location}}",
+          "sku": "Standard",
+          "admin_enabled": false,
+          "anonymous_pull_enabled": false,
+          "public_network_access_enabled": true,
+          "zone_redundancy_enabled": false,
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "login_server"
+        ]
+      },
+      {
+        "type": "azurerm_user_assigned_identity",
+        "name": "this",
+        "values": {
+          "name": "id-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "principal_id",
+          "client_id"
+        ]
+      },
+      {
+        "type": "azurerm_role_assignment",
+        "name": "acr_pull",
+        "values": {
+          "role_definition_name": "AcrPull"
+        },
+        "unknown": [
+          "id",
+          "scope",
+          "principal_id"
+        ],
+        "refs": [
+          "azurerm_container_registry.this",
+          "azurerm_user_assigned_identity.this"
+        ]
+      },
+      {
+        "type": "azurerm_container_app_environment",
+        "name": "this",
+        "values": {
+          "name": "cae-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "logs_destination": "log-analytics",
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "log_analytics_workspace_id"
+        ],
+        "refs": [
+          "azurerm_log_analytics_workspace.this"
+        ]
+      },
+      {
+        "type": "azurerm_container_app",
+        "name": "this",
+        "values": {
+          "name": "ca-{{name}}-{{environment}}",
+          "revision_mode": "Single",
+          "tags": "{{tags}}",
+          "identity": [
+            {
+              "type": "UserAssigned"
+            }
+          ],
+          "ingress": [
+            {
+              "external_enabled": "{{public}}",
+              "target_port": "{{port}}",
+              "transport": "auto",
+              "allow_insecure_connections": false
+            }
+          ],
+          "template": [
+            {
+              "min_replicas": "{{min_replicas}}",
+              "max_replicas": "{{max_replicas}}",
+              "container": [
+                {
+                  "name": "app",
+                  "image": "{{image}}",
+                  "cpu": "{{cpu}}",
+                  "memory": "{{memory_gb}}Gi"
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "latest_revision_fqdn",
+          "container_app_environment_id"
+        ],
+        "refs": [
+          "azurerm_container_app_environment.this",
+          "azurerm_user_assigned_identity.this"
+        ]
+      }
+    ],
+    "aws": [
+      {
+        "type": "aws_ecr_repository",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "image_tag_mutability": "IMMUTABLE",
+          "image_scanning_configuration": [
+            {
+              "scan_on_push": true
+            }
+          ],
+          "encryption_configuration": [
+            {
+              "encryption_type": "AES256"
+            }
+          ],
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn",
+          "repository_url"
+        ]
+      },
+      {
+        "type": "aws_ecr_lifecycle_policy",
+        "name": "this",
+        "values": {},
+        "unknown": [
+          "id",
+          "repository",
+          "policy"
+        ],
+        "refs": [
+          "aws_ecr_repository.this"
+        ]
+      },
+      {
+        "type": "aws_iam_role",
+        "name": "access",
+        "values": {
+          "name": "apprunner-ecr-{{name}}-{{environment}}",
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn"
+        ]
+      },
+      {
+        "type": "aws_iam_role",
+        "name": "instance",
+        "values": {
+          "name": "apprunner-app-{{name}}-{{environment}}",
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn"
+        ]
+      },
+      {
+        "type": "aws_apprunner_service",
+        "name": "this",
+        "values": {
+          "service_name": "{{name}}-{{environment}}",
+          "tags_all": "{{tags}}",
+          "instance_configuration": [
+            {
+              "cpu": "{{cpu}} vCPU",
+              "memory": "{{memory_gb}} GB"
+            }
+          ],
+          "network_configuration": [
+            {
+              "ingress_configuration": [
+                {
+                  "is_publicly_accessible": "{{public}}"
+                }
+              ]
+            }
+          ],
+          "source_configuration": [
+            {
+              "auto_deployments_enabled": false,
+              "image_repository": [
+                {
+                  "image_identifier": "{{image}}",
+                  "image_configuration": [
+                    {
+                      "port": "{{port}}"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "arn",
+          "service_url",
+          "auto_scaling_configuration_arn"
+        ],
+        "refs": [
+          "aws_iam_role.access",
+          "aws_iam_role.instance"
+        ]
+      }
+    ],
+    "gcp": [
+      {
+        "type": "google_artifact_registry_repository",
+        "name": "this",
+        "values": {
+          "repository_id": "{{name}}-{{environment}}",
+          "location": "{{region}}",
+          "format": "DOCKER",
+          "docker_config": [
+            {
+              "immutable_tags": true
+            }
+          ],
+          "labels": "{{labels}}"
+        },
+        "unknown": [
+          "id",
+          "name"
+        ]
+      },
+      {
+        "type": "google_service_account",
+        "name": "this",
+        "values": {
+          "account_id": "run-{{name}}-{{environment}}",
+          "display_name": "Cloud Run {{name}}-{{environment}}"
+        },
+        "unknown": [
+          "email",
+          "id"
+        ]
+      },
+      {
+        "type": "google_cloud_run_v2_service",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "location": "{{region}}",
+          "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+          "labels": "{{labels}}",
+          "template": [
+            {
+              "service_account": "run-{{name}}-{{environment}}@{{project_id}}.iam.gserviceaccount.com",
+              "scaling": [
+                {
+                  "min_instance_count": "{{min_replicas}}",
+                  "max_instance_count": "{{max_replicas}}"
+                }
+              ],
+              "containers": [
+                {
+                  "image": "{{image}}",
+                  "ports": [
+                    {
+                      "container_port": "{{port}}"
+                    }
+                  ],
+                  "resources": [
+                    {
+                      "limits": {
+                        "cpu": "1",
+                        "memory": "{{memory_gb}}Gi"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "uri"
+        ],
+        "refs": [
+          "google_service_account.this"
+        ]
+      }
+    ],
+    "oci": [
+      {
+        "type": "oci_container_instances_container_instance",
+        "name": "this",
+        "values": {
+          "display_name": "{{name}}-{{environment}}",
+          "shape": "CI.Standard.E4.Flex",
+          "container_restart_policy": "ALWAYS",
+          "freeform_tags": "{{tags}}",
+          "vnics": [
+            {
+              "subnet_id": "{{subnet_id}}",
+              "is_public_ip_assigned": "{{public}}"
+            }
+          ],
+          "containers": [
+            {
+              "image_url": "{{image}}",
+              "security_context": [
+                {
+                  "security_context_type": "LINUX",
+                  "is_non_root_user_check_enabled": true,
+                  "is_root_file_system_readonly": true,
+                  "capabilities": [
+                    {
+                      "drop_capabilities": [
+                        "ALL"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "availability_domain"
+        ]
+      }
+    ]
+  }
+}

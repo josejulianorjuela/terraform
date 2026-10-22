@@ -1,0 +1,564 @@
+{
+  "id": "serverless",
+  "name": "Función serverless con cola",
+  "description": "Función administrada que procesa mensajes de una cola o stream, con identidad propia de mínimo privilegio y trazas.",
+  "icon": "function",
+  "providers": [
+    "azure",
+    "aws",
+    "gcp",
+    "oci"
+  ],
+  "inputs": [
+    {
+      "name": "name",
+      "label": "Nombre",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "pattern": "^[a-z][a-z0-9-]{1,22}[a-z0-9]$",
+      "help": "De 3 a 24 caracteres: minúsculas, números y guiones; empieza con letra."
+    },
+    {
+      "name": "environment",
+      "label": "Ambiente",
+      "type": "select",
+      "default": "dev",
+      "required": true,
+      "options": [
+        "dev",
+        "test",
+        "prod"
+      ],
+      "help": "En prod se activan la protección contra borrado y las copias geo-redundantes."
+    },
+    {
+      "name": "language",
+      "label": "Lenguaje",
+      "type": "select",
+      "default": "python",
+      "required": true,
+      "options": [
+        "python",
+        "node"
+      ],
+      "help": "Se despliega un código de ejemplo; el equipo lo reemplaza desde su pipeline."
+    },
+    {
+      "name": "subnet_id",
+      "label": "Subred",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Azure: subred 'integracion' de Red base (delegada a Microsoft.App/environments). OCI: OCID de la subred privada.",
+      "providers": [
+        "azure",
+        "oci"
+      ]
+    },
+    {
+      "name": "image",
+      "label": "Imagen de la función",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Solo OCI: imagen en OCIR (región.ocir.io/espacio/repositorio:etiqueta).",
+      "providers": [
+        "oci"
+      ]
+    }
+  ],
+  "sizes": {
+    "pequeno": {
+      "label": "Pequeño: 512 MB, 30 s, hasta 10 instancias",
+      "vars": {
+        "memory_mb": 512,
+        "timeout_s": 30,
+        "max_instances": 10
+      },
+      "monthly": {
+        "azure": 5,
+        "aws": 5,
+        "gcp": 5,
+        "oci": 20
+      }
+    },
+    "mediano": {
+      "label": "Mediano: 2 GB, 60 s, hasta 50 instancias",
+      "vars": {
+        "memory_mb": 2048,
+        "timeout_s": 60,
+        "max_instances": 50
+      },
+      "monthly": {
+        "azure": 30,
+        "aws": 30,
+        "gcp": 30,
+        "oci": 45
+      }
+    },
+    "grande": {
+      "label": "Grande: 4 GB, 300 s, hasta 200 instancias",
+      "vars": {
+        "memory_mb": 4096,
+        "timeout_s": 300,
+        "max_instances": 200
+      },
+      "monthly": {
+        "azure": 120,
+        "aws": 110,
+        "gcp": 120,
+        "oci": 130
+      }
+    }
+  },
+  "outputs": [
+    {
+      "name": "function_name",
+      "label": "Función",
+      "kind": "text"
+    },
+    {
+      "name": "queue",
+      "label": "Cola o stream",
+      "kind": "text"
+    }
+  ],
+  "demo": {
+    "azure": [
+      {
+        "type": "azurerm_log_analytics_workspace",
+        "name": "this",
+        "values": {
+          "name": "log-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "sku": "PerGB2018",
+          "retention_in_days": 30,
+          "tags": "{{tags}}",
+          "local_authentication_enabled": false
+        },
+        "unknown": [
+          "id",
+          "workspace_id"
+        ]
+      },
+      {
+        "type": "azurerm_storage_account",
+        "name": "this",
+        "values": {
+          "name": "st{{name}}{{environment}}",
+          "location": "{{location}}",
+          "account_tier": "Standard",
+          "account_replication_type": "LRS",
+          "account_kind": "StorageV2",
+          "min_tls_version": "TLS1_2",
+          "https_traffic_only_enabled": true,
+          "allow_nested_items_to_be_public": false,
+          "shared_access_key_enabled": false,
+          "default_to_oauth_authentication": true,
+          "cross_tenant_replication_enabled": false,
+          "public_network_access_enabled": true,
+          "network_rules": [
+            {
+              "default_action": "Deny",
+              "bypass": [
+                "AzureServices"
+              ],
+              "virtual_network_subnet_ids": [
+                "{{subnet_id}}"
+              ]
+            }
+          ],
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "primary_blob_endpoint"
+        ]
+      },
+      {
+        "type": "azurerm_storage_queue",
+        "name": "this",
+        "values": {
+          "name": "trabajos"
+        },
+        "unknown": [
+          "id",
+          "storage_account_id"
+        ],
+        "refs": [
+          "azurerm_storage_account.this"
+        ]
+      },
+      {
+        "type": "azurerm_service_plan",
+        "name": "this",
+        "values": {
+          "name": "asp-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "os_type": "Linux",
+          "sku_name": "FC1",
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "worker_count"
+        ]
+      },
+      {
+        "type": "azurerm_function_app_flex_consumption",
+        "name": "this",
+        "values": {
+          "name": "func-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "runtime_name": "{{language}}",
+          "storage_authentication_type": "SystemAssignedIdentity",
+          "https_only": true,
+          "public_network_access_enabled": false,
+          "virtual_network_subnet_id": "{{subnet_id}}",
+          "instance_memory_in_mb": "{{memory_mb}}",
+          "identity": [
+            {
+              "type": "SystemAssigned"
+            }
+          ],
+          "site_config": [
+            {
+              "minimum_tls_version": "1.2",
+              "http2_enabled": true
+            }
+          ],
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "default_hostname"
+        ],
+        "refs": [
+          "azurerm_service_plan.this",
+          "azurerm_storage_account.this"
+        ]
+      }
+    ],
+    "aws": [
+      {
+        "type": "aws_sqs_queue",
+        "name": "dlq",
+        "values": {
+          "name": "{{name}}-{{environment}}-dlq",
+          "sqs_managed_sse_enabled": true,
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn",
+          "url"
+        ]
+      },
+      {
+        "type": "aws_sqs_queue",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "sqs_managed_sse_enabled": true,
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn",
+          "url",
+          "redrive_policy"
+        ],
+        "refs": [
+          "aws_sqs_queue.dlq"
+        ]
+      },
+      {
+        "type": "aws_iam_role",
+        "name": "this",
+        "values": {
+          "name": "lambda-{{name}}-{{environment}}",
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn"
+        ]
+      },
+      {
+        "type": "aws_lambda_function",
+        "name": "this",
+        "values": {
+          "function_name": "{{name}}-{{environment}}",
+          "runtime": "python3.13",
+          "handler": "main.handler",
+          "architectures": [
+            "arm64"
+          ],
+          "memory_size": "{{memory_mb}}",
+          "timeout": "{{timeout_s}}",
+          "tracing_config": [
+            {
+              "mode": "Active"
+            }
+          ],
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "arn",
+          "role",
+          "source_code_hash"
+        ],
+        "refs": [
+          "aws_iam_role.this"
+        ]
+      },
+      {
+        "type": "aws_lambda_event_source_mapping",
+        "name": "this",
+        "values": {
+          "batch_size": 10,
+          "scaling_config": [
+            {
+              "maximum_concurrency": "{{max_instances}}"
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "event_source_arn",
+          "function_name"
+        ],
+        "refs": [
+          "aws_sqs_queue.this",
+          "aws_lambda_function.this"
+        ]
+      }
+    ],
+    "gcp": [
+      {
+        "type": "google_storage_bucket",
+        "name": "source",
+        "values": {
+          "name": "{{project_id}}-{{name}}-{{environment}}-src",
+          "location": "{{region}}",
+          "uniform_bucket_level_access": true,
+          "public_access_prevention": "enforced",
+          "versioning": [
+            {
+              "enabled": true
+            }
+          ],
+          "labels": "{{labels}}",
+          "lifecycle_rule": [
+            {
+              "condition": [
+                {
+                  "num_newer_versions": 5,
+                  "with_state": "ARCHIVED"
+                }
+              ],
+              "action": [
+                {
+                  "type": "Delete"
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "self_link",
+          "soft_delete_policy"
+        ]
+      },
+      {
+        "type": "google_pubsub_topic",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "message_retention_duration": "86400s",
+          "labels": "{{labels}}",
+          "message_storage_policy": [
+            {
+              "allowed_persistence_regions": [
+                "{{region}}"
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "google_service_account",
+        "name": "this",
+        "values": {
+          "account_id": "fn-{{name}}-{{environment}}",
+          "display_name": "Función {{name}}-{{environment}}"
+        },
+        "unknown": [
+          "email",
+          "id"
+        ]
+      },
+      {
+        "type": "google_project_iam_member",
+        "name": "logs",
+        "values": {
+          "role": "roles/logging.logWriter"
+        },
+        "unknown": [
+          "id",
+          "member"
+        ],
+        "refs": [
+          "google_service_account.this"
+        ]
+      },
+      {
+        "type": "google_project_iam_member",
+        "name": "registry",
+        "values": {
+          "role": "roles/artifactregistry.writer"
+        },
+        "unknown": [
+          "id",
+          "member"
+        ],
+        "refs": [
+          "google_service_account.this"
+        ]
+      },
+      {
+        "type": "google_project_iam_member",
+        "name": "eventarc",
+        "values": {
+          "role": "roles/eventarc.eventReceiver"
+        },
+        "unknown": [
+          "id",
+          "member"
+        ],
+        "refs": [
+          "google_service_account.this"
+        ]
+      },
+      {
+        "type": "google_storage_bucket_iam_member",
+        "name": "source",
+        "values": {
+          "role": "roles/storage.objectViewer"
+        },
+        "unknown": [
+          "id",
+          "member"
+        ],
+        "refs": [
+          "google_storage_bucket.source",
+          "google_service_account.this"
+        ]
+      },
+      {
+        "type": "google_cloudfunctions2_function",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "location": "{{region}}",
+          "labels": "{{labels}}",
+          "service_config": [
+            {
+              "ingress_settings": "ALLOW_INTERNAL_ONLY",
+              "available_memory": "{{memory_mb}}Mi",
+              "timeout_seconds": "{{timeout_s}}",
+              "max_instance_count": "{{max_instances}}"
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "url"
+        ],
+        "refs": [
+          "google_service_account.this",
+          "google_pubsub_topic.this",
+          "google_storage_bucket.source"
+        ]
+      }
+    ],
+    "oci": [
+      {
+        "type": "oci_functions_application",
+        "name": "this",
+        "values": {
+          "display_name": "{{name}}-{{environment}}",
+          "subnet_ids": [
+            "{{subnet_id}}"
+          ],
+          "shape": "GENERIC_X86",
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "oci_functions_function",
+        "name": "this",
+        "values": {
+          "display_name": "{{name}}-{{environment}}",
+          "memory_in_mbs": "{{memory_mb}}",
+          "timeout_in_seconds": "{{timeout_s}}",
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "invoke_endpoint"
+        ],
+        "refs": [
+          "oci_functions_application.this"
+        ]
+      },
+      {
+        "type": "oci_streaming_stream_pool",
+        "name": "this",
+        "values": {
+          "name": "pool-{{name}}-{{environment}}",
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "oci_streaming_stream",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "partitions": 1,
+          "retention_in_hours": 24,
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "oci_streaming_stream_pool.this"
+        ]
+      },
+      {
+        "type": "oci_sch_service_connector",
+        "name": "this",
+        "values": {
+          "display_name": "sch-{{name}}-{{environment}}",
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "oci_streaming_stream.this",
+          "oci_functions_function.this"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,339 @@
+{
+  "id": "app-kubernetes",
+  "name": "Aplicación en Kubernetes",
+  "description": "Despliegue en un clúster existente con contenedores no root, raíz de solo lectura, límites, autoescalado, PDB, NetworkPolicy e Ingress con TLS opcional.",
+  "icon": "kubernetes",
+  "providers": [
+    "kubernetes"
+  ],
+  "inputs": [
+    {
+      "name": "name",
+      "label": "Nombre",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "pattern": "^[a-z][a-z0-9-]{1,22}[a-z0-9]$",
+      "help": "De 3 a 24 caracteres: minúsculas, números y guiones; empieza con letra."
+    },
+    {
+      "name": "environment",
+      "label": "Ambiente",
+      "type": "select",
+      "default": "dev",
+      "required": true,
+      "options": [
+        "dev",
+        "test",
+        "prod"
+      ],
+      "help": "En prod se activan la protección contra borrado y las copias geo-redundantes."
+    },
+    {
+      "name": "image",
+      "label": "Imagen",
+      "type": "string",
+      "default": "nginxinc/nginx-unprivileged:stable-alpine",
+      "required": true,
+      "help": "Debe correr como usuario no root y tolerar raíz de solo lectura (/tmp es escribible)."
+    },
+    {
+      "name": "port",
+      "label": "Puerto del contenedor",
+      "type": "number",
+      "default": 8080,
+      "required": true,
+      "min": 1,
+      "max": 65535
+    },
+    {
+      "name": "ingress_host",
+      "label": "Dominio público",
+      "type": "string",
+      "default": "",
+      "required": false,
+      "pattern": "^$|^([a-z0-9-]+\\.)+[a-z]{2,}$",
+      "help": "Vacío: sin Ingress (solo servicio interno). Con dominio: Ingress con TLS."
+    },
+    {
+      "name": "ingress_class",
+      "label": "Clase de Ingress",
+      "type": "string",
+      "default": "nginx",
+      "required": false
+    },
+    {
+      "name": "ingress_namespace",
+      "label": "Namespace del controlador de Ingress",
+      "type": "string",
+      "default": "ingress-nginx",
+      "required": false,
+      "help": "La NetworkPolicy solo deja entrar desde aquí y desde el mismo namespace."
+    },
+    {
+      "name": "create_namespace",
+      "label": "Crear namespace",
+      "type": "bool",
+      "default": true,
+      "required": false,
+      "help": "Crea un namespace propio con Pod Security 'restricted'."
+    }
+  ],
+  "sizes": {
+    "pequeno": {
+      "label": "Pequeño: 0,25 vCPU, 256 MB, de 2 a 4 réplicas",
+      "vars": {
+        "cpu": 0.25,
+        "memory_mb": 256,
+        "min_replicas": 2,
+        "max_replicas": 4
+      },
+      "monthly": {
+        "kubernetes": 15
+      }
+    },
+    "mediano": {
+      "label": "Mediano: 0,5 vCPU, 512 MB, de 2 a 6 réplicas",
+      "vars": {
+        "cpu": 0.5,
+        "memory_mb": 512,
+        "min_replicas": 2,
+        "max_replicas": 6
+      },
+      "monthly": {
+        "kubernetes": 45
+      }
+    },
+    "grande": {
+      "label": "Grande: 1 vCPU, 1 GB, de 3 a 10 réplicas",
+      "vars": {
+        "cpu": 1,
+        "memory_mb": 1024,
+        "min_replicas": 3,
+        "max_replicas": 10
+      },
+      "monthly": {
+        "kubernetes": 120
+      }
+    }
+  },
+  "outputs": [
+    {
+      "name": "url",
+      "label": "URL",
+      "kind": "url"
+    },
+    {
+      "name": "namespace",
+      "label": "Namespace",
+      "kind": "text"
+    }
+  ],
+  "demo": {
+    "kubernetes": [
+      {
+        "type": "kubernetes_namespace_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}",
+              "labels": "{{labels}}"
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "kubernetes_service_account_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}",
+              "labels": "{{labels}}"
+            }
+          ],
+          "automount_service_account_token": false
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_namespace_v1.this"
+        ]
+      },
+      {
+        "type": "kubernetes_deployment_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}",
+              "labels": "{{labels}}"
+            }
+          ],
+          "spec": [
+            {
+              "replicas": "{{min_replicas}}",
+              "template": [
+                {
+                  "spec": [
+                    {
+                      "automount_service_account_token": false,
+                      "security_context": [
+                        {
+                          "run_as_non_root": true,
+                          "run_as_user": 10001,
+                          "fs_group": 10001,
+                          "seccomp_profile": [
+                            {
+                              "type": "RuntimeDefault"
+                            }
+                          ]
+                        }
+                      ],
+                      "container": [
+                        {
+                          "name": "app",
+                          "image": "{{image}}",
+                          "resources": [
+                            {
+                              "requests": {
+                                "cpu": "{{cpu}}",
+                                "memory": "{{memory_mb}}Mi"
+                              },
+                              "limits": {
+                                "memory": "{{memory_mb}}Mi"
+                              }
+                            }
+                          ],
+                          "security_context": [
+                            {
+                              "run_as_non_root": true,
+                              "allow_privilege_escalation": false,
+                              "read_only_root_filesystem": true,
+                              "privileged": false,
+                              "capabilities": [
+                                {
+                                  "drop": [
+                                    "ALL"
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_namespace_v1.this",
+          "kubernetes_service_account_v1.this"
+        ]
+      },
+      {
+        "type": "kubernetes_service_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}"
+            }
+          ],
+          "spec": [
+            {
+              "type": "ClusterIP"
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_namespace_v1.this"
+        ]
+      },
+      {
+        "type": "kubernetes_horizontal_pod_autoscaler_v2",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}"
+            }
+          ],
+          "spec": [
+            {
+              "min_replicas": "{{min_replicas}}",
+              "max_replicas": "{{max_replicas}}"
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_deployment_v1.this"
+        ]
+      },
+      {
+        "type": "kubernetes_pod_disruption_budget_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}"
+            }
+          ],
+          "spec": [
+            {
+              "max_unavailable": "1"
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_namespace_v1.this"
+        ]
+      },
+      {
+        "type": "kubernetes_network_policy_v1",
+        "name": "this",
+        "values": {
+          "metadata": [
+            {
+              "name": "{{name}}-{{environment}}"
+            }
+          ],
+          "spec": [
+            {
+              "policy_types": [
+                "Ingress",
+                "Egress"
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "kubernetes_namespace_v1.this"
+        ]
+      }
+    ]
+  }
+}

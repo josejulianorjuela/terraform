@@ -1,0 +1,464 @@
+{
+  "id": "base-datos",
+  "name": "Base de datos PostgreSQL",
+  "description": "PostgreSQL administrado, privado (sin IP pública), cifrado, con TLS obligatorio, copias automáticas y alta disponibilidad opcional.",
+  "icon": "database",
+  "providers": [
+    "azure",
+    "aws",
+    "gcp",
+    "oci"
+  ],
+  "inputs": [
+    {
+      "name": "name",
+      "label": "Nombre",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "pattern": "^[a-z][a-z0-9-]{1,22}[a-z0-9]$",
+      "help": "De 3 a 24 caracteres: minúsculas, números y guiones; empieza con letra."
+    },
+    {
+      "name": "environment",
+      "label": "Ambiente",
+      "type": "select",
+      "default": "dev",
+      "required": true,
+      "options": [
+        "dev",
+        "test",
+        "prod"
+      ],
+      "help": "En prod se activan la protección contra borrado y las copias geo-redundantes."
+    },
+    {
+      "name": "postgres_version",
+      "label": "Versión de PostgreSQL",
+      "type": "select",
+      "default": "16",
+      "required": true,
+      "options": [
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "name": "admin_username",
+      "label": "Usuario administrador",
+      "type": "string",
+      "default": "app_admin",
+      "required": true,
+      "pattern": "^[a-z][a-z0-9_]{2,30}$",
+      "help": "En Azure el acceso es solo con Entra ID y este usuario no se usa."
+    },
+    {
+      "name": "allowed_cidr",
+      "label": "Red que puede conectarse",
+      "type": "string",
+      "default": "10.0.0.0/8",
+      "required": true,
+      "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$",
+      "help": "AWS y OCI: CIDR privado con acceso al puerto 5432."
+    },
+    {
+      "name": "subnet_id",
+      "label": "Subred",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Azure: subred delegada a PostgreSQL ('datos' de Red base). OCI: OCID de la subred privada.",
+      "providers": [
+        "azure",
+        "oci"
+      ]
+    },
+    {
+      "name": "subnet_ids",
+      "label": "Subredes privadas",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Solo AWS: ids separados por comas, en al menos dos zonas.",
+      "providers": [
+        "aws"
+      ]
+    },
+    {
+      "name": "network",
+      "label": "Red VPC",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Solo GCP: id de la VPC con acceso privado a servicios (salida 'network_id' de Red base).",
+      "providers": [
+        "gcp"
+      ]
+    },
+    {
+      "name": "admin_password_secret_id",
+      "label": "Secreto de la contraseña",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "help": "Solo OCI: OCID del secreto de OCI Vault con la contraseña del administrador.",
+      "providers": [
+        "oci"
+      ]
+    }
+  ],
+  "sizes": {
+    "pequeno": {
+      "label": "Pequeño: 2 vCPU, 8 GB, 32 GB, sin HA",
+      "vars": {
+        "cpu": 2,
+        "memory_gb": 8,
+        "storage_gb": 32,
+        "ha": false,
+        "backup_retention_days": 7
+      },
+      "monthly": {
+        "azure": 60,
+        "aws": 65,
+        "gcp": 110,
+        "oci": 90
+      }
+    },
+    "mediano": {
+      "label": "Mediano: 4 vCPU, 16 GB, 128 GB, HA entre zonas",
+      "vars": {
+        "cpu": 4,
+        "memory_gb": 16,
+        "storage_gb": 128,
+        "ha": true,
+        "backup_retention_days": 14
+      },
+      "monthly": {
+        "azure": 590,
+        "aws": 600,
+        "gcp": 520,
+        "oci": 380
+      }
+    },
+    "grande": {
+      "label": "Grande: 8 vCPU, 32 GB, 512 GB, HA entre zonas",
+      "vars": {
+        "cpu": 8,
+        "memory_gb": 32,
+        "storage_gb": 512,
+        "ha": true,
+        "backup_retention_days": 35
+      },
+      "monthly": {
+        "azure": 1250,
+        "aws": 1280,
+        "gcp": 1100,
+        "oci": 760
+      }
+    }
+  },
+  "outputs": [
+    {
+      "name": "host",
+      "label": "Servidor",
+      "kind": "text"
+    },
+    {
+      "name": "port",
+      "label": "Puerto",
+      "kind": "text"
+    }
+  ],
+  "demo": {
+    "azure": [
+      {
+        "type": "azurerm_private_dns_zone",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}.private.postgres.database.azure.com",
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "azurerm_postgresql_flexible_server",
+        "name": "this",
+        "values": {
+          "name": "psql-{{name}}-{{environment}}",
+          "location": "{{location}}",
+          "version": "{{postgres_version}}",
+          "sku_name": "B_Standard_B2ms",
+          "storage_mb": 32768,
+          "auto_grow_enabled": true,
+          "backup_retention_days": "{{backup_retention_days}}",
+          "geo_redundant_backup_enabled": "{{is_prod}}",
+          "delegated_subnet_id": "{{subnet_id}}",
+          "public_network_access_enabled": false,
+          "authentication": [
+            {
+              "active_directory_auth_enabled": true,
+              "password_auth_enabled": false
+            }
+          ],
+          "high_availability": [],
+          "tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "fqdn",
+          "private_dns_zone_id"
+        ],
+        "refs": [
+          "azurerm_private_dns_zone.this"
+        ]
+      },
+      {
+        "type": "azurerm_postgresql_flexible_server_active_directory_administrator",
+        "name": "this",
+        "values": {
+          "principal_type": "ServicePrincipal"
+        },
+        "unknown": [
+          "id",
+          "object_id",
+          "server_name"
+        ],
+        "refs": [
+          "azurerm_postgresql_flexible_server.this"
+        ]
+      }
+    ],
+    "aws": [
+      {
+        "type": "aws_db_subnet_group",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "subnet_ids"
+        ]
+      },
+      {
+        "type": "aws_security_group",
+        "name": "this",
+        "values": {
+          "name": "sg-db-{{name}}-{{environment}}",
+          "tags_all": "{{tags}}",
+          "ingress": [
+            {
+              "protocol": "tcp",
+              "from_port": 5432,
+              "to_port": 5432,
+              "cidr_blocks": [
+                "{{allowed_cidr}}"
+              ],
+              "ipv6_cidr_blocks": []
+            }
+          ],
+          "egress": [
+            {
+              "protocol": "-1",
+              "from_port": 0,
+              "to_port": 0,
+              "cidr_blocks": [
+                "{{allowed_cidr}}"
+              ],
+              "ipv6_cidr_blocks": []
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "vpc_id"
+        ]
+      },
+      {
+        "type": "aws_db_parameter_group",
+        "name": "this",
+        "values": {
+          "family": "postgres{{postgres_version}}",
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ]
+      },
+      {
+        "type": "aws_db_instance",
+        "name": "this",
+        "values": {
+          "identifier": "{{name}}-{{environment}}",
+          "engine": "postgres",
+          "engine_version": "{{postgres_version}}",
+          "instance_class": "db.t4g.medium",
+          "allocated_storage": "{{storage_gb}}",
+          "storage_type": "gp3",
+          "storage_encrypted": true,
+          "publicly_accessible": false,
+          "multi_az": "{{ha}}",
+          "backup_retention_period": "{{backup_retention_days}}",
+          "deletion_protection": "{{is_prod}}",
+          "auto_minor_version_upgrade": true,
+          "iam_database_authentication_enabled": true,
+          "manage_master_user_password": true,
+          "performance_insights_enabled": true,
+          "copy_tags_to_snapshot": true,
+          "tags_all": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "address",
+          "endpoint",
+          "master_user_secret"
+        ],
+        "refs": [
+          "aws_db_subnet_group.this",
+          "aws_security_group.this",
+          "aws_db_parameter_group.this"
+        ]
+      }
+    ],
+    "gcp": [
+      {
+        "type": "google_sql_database_instance",
+        "name": "this",
+        "values": {
+          "name": "{{name}}-{{environment}}",
+          "region": "{{region}}",
+          "database_version": "POSTGRES_{{postgres_version}}",
+          "deletion_protection": "{{is_prod}}",
+          "settings": [
+            {
+              "tier": "db-custom-2-8192",
+              "edition": "ENTERPRISE",
+              "availability_type": "ZONAL",
+              "disk_size": "{{storage_gb}}",
+              "disk_autoresize": true,
+              "deletion_protection_enabled": "{{is_prod}}",
+              "user_labels": "{{labels}}",
+              "ip_configuration": [
+                {
+                  "ipv4_enabled": false,
+                  "private_network": "{{network}}",
+                  "ssl_mode": "ENCRYPTED_ONLY",
+                  "authorized_networks": []
+                }
+              ],
+              "backup_configuration": [
+                {
+                  "enabled": true,
+                  "point_in_time_recovery_enabled": true,
+                  "start_time": "03:00"
+                }
+              ],
+              "database_flags": [
+                {
+                  "name": "cloudsql.iam_authentication",
+                  "value": "on"
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id",
+          "private_ip_address",
+          "connection_name"
+        ]
+      }
+    ],
+    "oci": [
+      {
+        "type": "oci_core_network_security_group",
+        "name": "this",
+        "values": {
+          "display_name": "nsg-db-{{name}}-{{environment}}",
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id",
+          "vcn_id"
+        ]
+      },
+      {
+        "type": "oci_core_network_security_group_security_rule",
+        "name": "postgres",
+        "values": {
+          "direction": "INGRESS",
+          "protocol": "6",
+          "source": "{{allowed_cidr}}",
+          "source_type": "CIDR_BLOCK",
+          "tcp_options": [
+            {
+              "destination_port_range": [
+                {
+                  "min": 5432,
+                  "max": 5432
+                }
+              ]
+            }
+          ]
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "oci_core_network_security_group.this"
+        ]
+      },
+      {
+        "type": "oci_psql_db_system",
+        "name": "this",
+        "values": {
+          "display_name": "{{name}}-{{environment}}",
+          "db_version": "{{postgres_version}}",
+          "shape": "PostgreSQL.VM.Standard.E5.Flex",
+          "network_details": [
+            {
+              "subnet_id": "{{subnet_id}}"
+            }
+          ],
+          "storage_details": [
+            {
+              "system_type": "OCI_OPTIMIZED_STORAGE",
+              "is_regionally_durable": true
+            }
+          ],
+          "credentials": [
+            {
+              "username": "{{admin_username}}",
+              "password_details": [
+                {
+                  "password_type": "VAULT_SECRET"
+                }
+              ]
+            }
+          ],
+          "management_policy": [
+            {
+              "backup_policy": [
+                {
+                  "kind": "DAILY",
+                  "retention_days": "{{backup_retention_days}}"
+                }
+              ]
+            }
+          ],
+          "freeform_tags": "{{tags}}"
+        },
+        "unknown": [
+          "id"
+        ],
+        "refs": [
+          "oci_core_network_security_group.this"
+        ]
+      }
+    ]
+  }
+}
